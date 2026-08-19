@@ -270,12 +270,25 @@ def flute_to_ocarina_dialogue_fixes(main: Assembly) -> None:
         until="#_1CCC23:",
     )
     main.splice(
-        "#_1CCC66:",  # Message_00E9 (1/2): "...play my flute" (end of line)
+        "#_1CCC4D:",  # Message_00E9 (1/4): move "looks" onto line 1 -- the
+        # 2 extra chars from "flute"->"ocarina" (below) push "looks like
+        # I can't play my ocarina" past line 2's budget; shifting "looks"
+        # up onto line 1 ("...But it looks") keeps both lines safe.
+        datas(["db $59, $25, $28, $28, $24, $2C, $75 ; <space>looks"]),
+        until="#_1CCC4E:",
+    )
+    main.splice(
+        "#_1CCC4E:",  # Message_00E9 (2/4): drop "looks<space>", now on line 1
+        datas(["db $25, $22, $24 ; lik"]),
+        until="#_1CCC56:",
+    )
+    main.splice(
+        "#_1CCC66:",  # Message_00E9 (3/4): "...play my flute" (end of line)
         datas(["db $28, $1C, $1A, $2B, $22, $27, $1A ; ocarina"]),
         until="#_1CCC6B:",
     )
     main.splice(
-        "#_1CCD08:",  # Message_00E9 (2/2): "the flute one last time…"
+        "#_1CCD08:",  # Message_00E9 (4/4): "the flute one last time…"
         datas(
             [
                 "db $D8, $59, $28, $1C, $1A, $2B, $22, $27, $1A, $59"
@@ -575,84 +588,10 @@ def text(
     decompress_hook = jp.address_of("DecompressFontGFX")
     masks_hook = jp.address_of("BuildSomeTextMasks")
 
-    # [ENG-TEXT] vanilla US bug: RenderText_PerformVWFing draws each glyph
-    # into a per-row WRAM strip (2 tile-halves, $0150 bytes -- 168 pixels --
-    # each) and, at the end of a glyph's own draw, unconditionally spills any
-    # leftover shifted font bits one slot further ahead (`STA.l $7F0000,X`,
-    # both halves). This isn't seeding the *next* character -- it's finishing
-    # this glyph's *own* trailing pixel: the font stores each glyph a hair
-    # wider than its declared advance width, and this is that overhang. For
-    # every character but the last on a line that overhang lands in the next
-    # glyph's own slot and gets absorbed into it (that glyph hasn't been
-    # drawn yet). For the last character there is no next glyph -- the write
-    # still fires (it only checks "are there leftover bits", never "is there
-    # a next character"), landing wherever the address arithmetic points.
-    # Confirmed live (Mesen trace) on "said, "Once I have finished with": the
-    # line's own last character's spillover write lands inside "said"'s
-    # *own* pixel data at the very start of the same row, corrupting its
-    # border.
-    #
-    # Widening this budget so the overflow has somewhere real to land
-    # (rather than discarding it) was tried twice and reverted both times.
-    # This whole strip is DMA'd to VRAM in one shot every NMI by bank_00's
-    # own NMI_UploadBG3Text (traced live: source $7F0000, size $07E0, dest
-    # VRAM $F800) into a *shared* VRAM region ($E000-$FFFF) that also holds
-    # the entire static item-menu font (letters, numbers, hearts, every
-    # dungeon/item icon -- confirmed by rendering the region's raw tiles,
-    # tools/render_tiles.py). The dialog text strip is packed into whatever
-    # that static font leaves over, and it runs flush to VRAM's own last
-    # tile with nothing to spare -- there is no padding anywhere nearby to
-    # borrow, uniformly or row-by-row; every byte past the current $07E0 is
-    # either past VRAM entirely or already someone else's real tile data.
-    # Widening (both a uniform 3-row attempt and a smaller, single-row one)
-    # measurably corrupted that shared region both times. A fix that
-    # actually renders the pixel would need the dialog strip to borrow
-    # unused-*while-a-dialog-is-open* tiles from the static font instead
-    # (plausible -- the item menu and dialog boxes likely never show at
-    # once -- but unverified, and a meaningfully bigger change than this).
-    # Simply discarding the overflowing write is the safe fix actually
-    # applied here: it stops the corruption at the cost of the last
-    # character's own trailing pixel silently not being drawn (confirmed
-    # live: "with"'s own closing border goes missing rather than corrupting
-    # "said") -- a real but purely cosmetic gap, on a line that already only
-    # exists because it slightly overflows this budget in the first place.
-    for label, base in (("top", "$0726"), ("bottom", "$08")):
-        needle = f"BEQ .{label}_none_left"
-        beq_index = engine.find(needle)
-        spill_check = engine.lines[beq_index - 1]
-        if "LDA.b $04" not in str(spill_check):
-            msg = f"{needle}: expected LDA.b $04 immediately before it"
-            raise ValueError(msg)
-        engine.insert_before(
-            str(spill_check),
-            instructions(
-                [
-                    "TXA",
-                    "SEC",
-                    f"SBC.w {base}",
-                    "CMP.w #$0150",
-                    f"BCS .{label}_none_left",
-                ]
-            ),
-        )
-    # The spillover check above adds 10 bytes to the top-half loop body,
-    # pushing its own backward loop branch out of an 8-bit relative branch's
-    # range (confirmed by asar: "Distance is -137", 9 over the -128 limit).
-    # The bottom-half loop already uses a long branch here (BRL .bottom_
-    # next_row) for the same reason; widen the top-half's short one to
-    # match instead of trimming the check above.
-    engine.splice(
-        "BNE .top_next_row",
-        [
-            *instructions(["BEQ .top_loop_done", "BRL .top_next_row"]),
-            note(".top_loop_done:"),
-        ],
-    )
-
-    # [ENG-TEXT] the discarded overflow above (the missing trailing border on
-    # "with", on that same "said, "Once..." line) is a symptom of that line's
-    # own drawn width landing over the 168px-per-half budget -- the font's
-    # quote-mark glyph (`"`) declares an 8px advance width but its own ink
+    # [ENG-TEXT] vanilla US bug: one message line ("said, "Once I have
+    # finished with...") draws past the VWF's 168px-per-half (`$0150`-byte)
+    # row budget by a single pixel -- the font's quote-mark glyph (`"`)
+    # declares an 8px advance width but its own ink
     # (decoded from us_font.2bpp) only occupies columns 0-4. Every other
     # glyph checked (period, comma, `O`) declares a width that fits its own
     # ink exactly, zero slack; the quote is the one glyph in the font that
@@ -670,9 +609,9 @@ def text(
     # edge, so they aren't relying on that trailing padding either. Message
     # line breaks are all hardcoded by the data's own $75/$76/$73 ops, not
     # reflowed from character width, so this can't shift where any line
-    # wraps -- it only changes the per-line pixel total the overflow check
-    # above compares against. Confirmed live (Mesen trace, same line):
-    # "with"'s own trailing border renders correctly.
+    # wraps -- it only changes this one line's own total pixel width.
+    # Confirmed live (Mesen trace, same line): "with"'s own trailing
+    # border, previously corrupted by the 1px overflow, renders correctly.
     engine.replace(
         "db   8,  7,  7,  7,  7,  4", "db   6,  7,  7,  7,  7,  4", 1
     )

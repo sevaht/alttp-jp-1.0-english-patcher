@@ -156,7 +156,7 @@ python3 binextract.py          # extract bin/gfx/* (JP + US), bin/brr/* (JP)
 
 On Windows, run `binextract.py`, then `_build.bat`. `make` also works on any
 platform with `asarmon` on `PATH`. All three produce `alttp-english.sfc`; a
-correct default build has MD5 `0a74e88e0da11188ac1bbb1e17583894`.
+correct default build has MD5 `619c5348c7c5082dfe358c56af2b6104`.
 
 ## Binaries
 
