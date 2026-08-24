@@ -295,9 +295,9 @@ def _build_parser() -> argparse.ArgumentParser:
         help="keep the original US translation's wording in dialogue, the "
         "intro, the credits, and the item menu; by default this patcher "
         "applies GBA-era wording fixes: 'pegasus shoes' -> 'pegasus "
-        "boots', 'faerie'/'faeries' -> 'fairy'/'fairies', 'wise men'/'wise "
-        "man' -> 'sages'/'sage' (the latter never occurs), 'smithery' -> "
-        "'smithy', and the bottled 'GOOD BEE' item -> 'GOLDEN'/'BEE'",
+        "boots', 'faerie'/'faeries' -> 'fairy'/'fairies', 'wise men' -> "
+        "'sages', 'smithery' -> 'smithy', and the bottled 'GOOD BEE' item "
+        "-> 'GOLDEN'/'BEE'",
     )
     parser.add_argument(
         "--keep-jp-credits",

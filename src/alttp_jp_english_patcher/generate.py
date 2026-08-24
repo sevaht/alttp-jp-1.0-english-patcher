@@ -1061,6 +1061,20 @@ def credits_font_upload(
         )
         raise ValueError(msg)
     credits_init_resume = credits_init_polyhedral_call + 4
+    # Only needed for --credits-font us's own palette patch (see the footer
+    # below) -- the resume point there lands after this call instead of
+    # after Credits_InitializePolyhedral.
+    credits_palette_load_call = (
+        jp.block("Credits_InitializeTheActualCredits")
+        .line("JSL PaletteLoad_HUD")
+        .address
+    )
+    if credits_palette_load_call is None:
+        msg = (
+            "Credits_InitializeTheActualCredits: JSL PaletteLoad_HUD is"
+            " not a live-anchored instruction"
+        )
+        raise ValueError(msg)
     # Credits_InitializePolyhedral's own premature STA.b $13 -- see
     # EN_CreditsInitPolyhedral_SkipPrematureUnblank below for why this is
     # skipped rather than raced against (again).
@@ -1324,13 +1338,99 @@ def credits_font_upload(
             "REP #$20",
         ]
     ).ensure_anchors()
-    clear_attribution_tilemap_footer = Assembly.from_content(
-        [
-            "PLP",
-            "JSL Credits_InitializePolyhedral",
-            f"JML ${credits_init_resume:06X}",
+    if credits_font == "us":
+        # [ENG-CREDITS-FONT] TheFont (the US dialogue font, used here for
+        # the TOP/BOTTOM/white location-caption role only -- see
+        # us_credits_font_asset's module docstring for why the SMALL/yellow
+        # role is never touched) shades curved/gapped letters via color
+        # CONTRAST between pixel values 1 and 2/3, not true zero-value
+        # gaps. Credits' own font palette 7 (TOP/BOTTOM role) is otherwise
+        # degenerate by design for JP's own bold glyphs -- only color index
+        # 2 is a real color; indices 1 and 3 are both black, same as index
+        # 0 (background) -- fine for JP's own glyphs, but it silently
+        # drops TheFont's own outline/accent shading, collapsing every
+        # curved letter into a solid block. Patched below (CGRAM 29/31 =
+        # palette 7's own indices 1/3) with real colors, not invented ones
+        # -- pulled from the US ROM's own bank_1B HUD-palette data (PC
+        # $0DD660, PaletteData_hud_00 in the underlying disassembly; this
+        # exact [black, black outline, white fill, red accent] quad
+        # recurs at multiple rows in that same table, e.g. PC $0DD668:
+        # $0000, $0018, $7FFF, $0000 -- the standard "real text" palette
+        # shape this ROM uses elsewhere, not a one-off guess). This is
+        # additive: color indices
+        # 28/30 (background and the existing bright fill) are untouched,
+        # and this doesn't modify Palettes_HUD (jpdasm bank_1B -- a shared
+        # sprite/HUD accent table, also used for sword/shield glow effects
+        # and other HUD elements, confirmed via a static ROM byte-pattern
+        # search -- not safe to edit directly), so jp mode and every other
+        # CGRAM 7 consumer are unaffected. Palette 3 (SMALL role) is never
+        # touched at all now -- that role always renders JP's own font
+        # (see us_credits_font_asset), whose glyphs were designed around
+        # this exact degenerate palette; patching it would only break them.
+        #
+        # A one-off write placed right here (before Credits_
+        # InitializePolyhedral even runs) doesn't stick, confirmed live
+        # (byte dump at the actual caption frame): Credits_
+        # InitializeTheActualCredits's own JSL PaletteLoad_HUD -- which
+        # runs later in its normal flow, right after Credits_
+        # InitializePolyhedral -- reloads all of PAL_HUD wholesale from
+        # ROM's Palettes_HUD table, clobbering anything written before it.
+        # Placed in the footer instead (below, after the reproduced JSL
+        # PaletteLoad_HUD), it patches PAL_HUD (symbols_wram.asm: PAL_HUD7
+        # = $7EC538, index 1 at +2, index 3 at +6 -- "Main palette block
+        # written to CGRAM", the source bank_00's own DOCGRAM-gated DMA,
+        # #_008B87's .skip_CGRAM block, copies wholesale into real CGRAM
+        # every time DOCGRAM/$7E0015 is set) *after* PaletteLoad_HUD's own
+        # reload -- confirmed live via an exec/write trace this still
+        # wasn't enough: Credits_LoadOverworldScene_PrepGFX's own
+        # Overworld_CopyPalettesToCache call (bank_02, #_02C4CD -- runs on
+        # every credits location, right after its font upload) re-syncs
+        # PAL_HUD wholesale from PALB_HUD ($7EC300 -- "Palette buffer 2",
+        # a *second*, more foundational WRAM copy that PAL_HUD itself gets
+        # refreshed from) a few frames later, clobbering PAL_HUD again
+        # with PALB_HUD's still-original values. Patching PALB_HUD too
+        # (same indices/offsets, $7EC300 base instead of $7EC500) closes
+        # that gap: whichever buffer a given reload actually reads from,
+        # it now already has the new colors.
+        credits_font_palette_patch = instructions(
+            [
+                "REP #$20",
+                "LDA.w #$0000",
+                "STA.l $7EC33A ; PALB_HUD7 index 1 (staging copy)",
+                "STA.l $7EC53A ; PAL_HUD7 index 1 (CGRAM color 29)",
+                "LDA.w #$0018",
+                "STA.l $7EC33E ; PALB_HUD7 index 3 (staging copy)",
+                "STA.l $7EC53E ; PAL_HUD7 index 3 (CGRAM color 31)",
+            ]
+        )
+        # Reproduces Credits_InitializeTheActualCredits's own instructions
+        # from JSL Credits_InitializePolyhedral through JSL PaletteLoad_HUD
+        # (inclusive) verbatim -- not hand-transcribed -- so the palette
+        # patch above can run right after the real PaletteLoad_HUD call
+        # instead of before it.
+        init_block = jp.block("Credits_InitializeTheActualCredits")
+        poly_index = init_block.find("JSL Credits_InitializePolyhedral")
+        palette_load_index = init_block.find("JSL PaletteLoad_HUD")
+        reproduced_through_palette_load = init_block.lines[
+            poly_index : palette_load_index + 1
         ]
-    ).ensure_anchors()
+        footer_resume = credits_palette_load_call + 4
+        clear_attribution_tilemap_footer = Assembly(
+            [
+                instruction("PLP"),
+                *reproduced_through_palette_load,
+                *credits_font_palette_patch,
+                instruction(f"JML ${footer_resume:06X}"),
+            ]
+        ).ensure_anchors()
+    else:
+        clear_attribution_tilemap_footer = Assembly.from_content(
+            [
+                "PLP",
+                "JSL Credits_InitializePolyhedral",
+                f"JML ${credits_init_resume:06X}",
+            ]
+        ).ensure_anchors()
     relocation.place(
         Assembly(
             clear_attribution_tilemap_header.lines
@@ -1341,6 +1441,52 @@ def credits_font_upload(
         "Synchronous VRAM $6800-$6FFF clear before credits unblank -- fixes"
         " the transition-into-credits garbage flash.",
     )
+    if credits_font == "us":
+        # Credits_InitializeTheActualCredits's own JSL PaletteLoad_HUD only
+        # runs once, at the very start of the whole credits sequence -- but
+        # each individual location shown during the sequence gets its own
+        # fresh PAL_HUD reload too, via Credits_LoadOverworldScene_PrepGFX's
+        # (bank_02) own unconditional JSL PaletteLoad_HUD (confirmed live:
+        # the very first caption still showed degenerate colors even with
+        # the patch above in place, byte dump at the actual caption frame).
+        # Same fix, same hook shape, at this second call site: reproduce
+        # the displaced JSL PaletteLoad_HUD, patch right after it, resume.
+        overworld_palette_load_call = (
+            jp.block("Credits_LoadOverworldScene_PrepGFX")
+            .line("JSL PaletteLoad_HUD")
+            .address
+        )
+        if overworld_palette_load_call is None:
+            msg = (
+                "Credits_LoadOverworldScene_PrepGFX: JSL PaletteLoad_HUD is"
+                " not a live-anchored instruction"
+            )
+            raise ValueError(msg)
+        relocation.place(
+            Assembly(
+                [
+                    note(
+                        "; [ENG-CREDITS-FONT] Same palette patch as EN_"
+                        "CreditsFont_ClearAttributionTilemap's own footer"
+                        " (see credits_font_upload above for the full"
+                        " explanation) -- Credits_LoadOverworldScene_"
+                        "PrepGFX reloads PAL_HUD fresh on every credits"
+                        " location, not just once at startup, so this"
+                        " needs the same patch reapplied here too."
+                    ),
+                    note("CreditsOverworldPaletteLoad_Patch:"),
+                    instruction("JSL PaletteLoad_HUD"),
+                    *credits_font_palette_patch,
+                    instruction("SEP #$20"),
+                    instruction(
+                        f"JML ${overworld_palette_load_call + 4:06X}"
+                    ),
+                ]
+            ).ensure_anchors(),
+            0x20B120,
+            "Credits_LoadOverworldScene_PrepGFX: patch the palette again"
+            " after its own PaletteLoad_HUD reload.",
+        )
     return relocation
 
 
@@ -3375,6 +3521,27 @@ def mothula_damage_bugfix(*, changes: bool, fix_mothula_bugs: bool = False) -> R
     return relocation
 
 
+def _wire_credits_overworld_palette_patch(
+    english: Rom, credits_font: str
+) -> None:
+    """See EN_CreditsOverworldPaletteLoad_Patch (credits_font_upload, bank
+    $20): Credits_LoadOverworldScene_PrepGFX reloads PAL_HUD fresh on every
+    credits location (not just once at startup like Credits_
+    InitializeTheActualCredits), so the font's palette patch needs
+    reapplying here too.
+    """
+    if credits_font != "us":
+        return
+    overworld_palette_load_call = _address_of_line(
+        english, "Credits_LoadOverworldScene_PrepGFX", "JSL PaletteLoad_HUD"
+    )
+    english.relocate_block(
+        overworld_palette_load_call,
+        "EN_CreditsOverworldPaletteLoad_Patch",
+        resume=overworld_palette_load_call + 4,
+    )
+
+
 def apply_base_edits(
     english: Rom,
     *,
@@ -3385,6 +3552,7 @@ def apply_base_edits(
     us_title_screen: bool = True,
     low_health_beep: bool = True,
     fix_mothula_bugs: bool = False,
+    credits_font: str = "jp",
 ) -> None:
     """Apply the base edits that are not plain hooks (see _wire_hooks)."""
     # Save compatibility: invoke the migrator (in bank $2C) from bank_00's
@@ -3708,6 +3876,7 @@ def apply_base_edits(
         "EN_CreditsInitPolyhedral_SkipPrematureUnblank",
         resume=polyhedral_premature_write + 4,
     )
+    _wire_credits_overworld_palette_patch(english, credits_font)
     # Real US's own Intro_InitializeMemory dispatch (usdasm bank_0C) has
     # eleven steps; JP's (this bank) has twelve, because JP splits US's
     # single Intro_LoadTextAndPalettes step into two: this one and a
@@ -4459,6 +4628,7 @@ def build(
             us_title_screen=title_screen_on,
             low_health_beep=low_health_beep,
             fix_mothula_bugs=fix_mothula_bugs,
+            credits_font=credits_font,
         )
         if intro_fix:
             apply_intro_fix(english)

@@ -1,28 +1,66 @@
 #!/usr/bin/env python3
-"""A US-styled alternate for the credits' font, in the same tile-slot layout
-as :mod:`jp_credits_font_asset`'s ``jp_credits_font.2bpp`` (see
+"""A US-styled alternate for credits' TOP/BOTTOM (2-tile, white) location
+captions, in the same tile-slot layout as :mod:`jp_credits_font_asset`'s
+``jp_credits_font.2bpp`` (see
 ``resources/binextract_us_credits_font.py.template``).
 
-Every character JP 1.0's credits actually display (``Credits_CharacterToTile``,
-jpdasm bank_0E -- each entry pre-labeled with its literal character by the
-disassembler, no reverse-engineering needed there) is looked up by its US
-dialogue-font (``TheFont``) tile instead of JP's own bold glyph, written to
-the SAME tile slot ``jp_credits_font.2bpp`` uses for that character. This
-lets credits load either file interchangeably (``--credits-font jp/us``)
-with no other code changes -- same slot numbers, same
-``Credits_CharacterToTile``/``CreditsTextLine`` data, just different pixel
-data at each slot.
+Credits actually has TWO fonts, not one, and they don't both vary by
+region. The SMALL (1-tile, yellow) captions (e.g. "THE RETURN OF THE
+KING") use a bold, purpose-built font that is pixel-identical between the
+JP and US ROMs -- it was never regionalized, there is nothing to swap.
+The TOP/BOTTOM (2-tile, white) location captions (e.g. "HYRULE CASTLE")
+use a *different*, genuinely region-specific font: JP 1.0's own bolder
+glyphs vs. the US ROM's own ``TheFont`` (its regular dialogue VWF font,
+confirmed live: the real US ROM's ``Credits_InitializeTheActualCredits``,
+usdasm bank_0E, calls ``JSL TransferFontToVRAM`` directly for credits,
+same as normal dialogue -- no separate compressed credits-only asset on
+the US side at all). ``--credits-font`` only ever needed to swap *this*
+one font; the SMALL-role font was never in scope and should never be
+touched, in either mode.
 
-:data:`TILE_MAP` (JP credits tile slot -> source US ``TheFont`` tile) was
-derived from two ``usdasm`` bank_0E facts, both confirmed by reading the
-source directly (not guessed): the VWF renderer's own character-code ->
-``TheFont`` tile arithmetic (``RenderText_PerformVWFing``: ``tile = ((code &
-$F0) << 1) | (code & $0F)``), and its ``.width`` table's own row-by-row
-comments giving each character's code (A-Z = 0-25, 0-9 = 52-61, the
-``!?-.,…`` row = 62-67, the ``"↑↓←→'`` row = 76-81). The one credits
-character with no US dialogue-font equivalent (a green bullet/list-marker,
-``•``, used once) is left out of the map entirely -- its slot stays blank
-(0x00) in the output, same as any slot no JP credits text references at all.
+Built output is therefore **not a from-scratch font sheet**: ``build_output``
+(see the template) starts from the ALREADY-BUILT ``bin/gfx/jp_credits_font
+.2bpp`` (extraction order guarantees it exists first -- see
+``deploy/binextract.py``) and only overwrites the TOP-role slots
+:data:`TOP_TILE_MAP` lists (both halves, from US ``TheFont``) -- every
+other slot, SMALL-role included, comes through unchanged from JP's own
+font. This means ``us_credits_font.2bpp`` and ``jp_credits_font.2bpp``
+are byte-identical outside the ~40 characters TOP-role captions actually
+use, by construction, not by re-deriving JP's own font a second time.
+
+:data:`TOP_TILE_MAP` (JP credits tile slot -> source US ``TheFont`` top-
+half tile) was read directly off usdasm bank_0E's own
+``Credits_CharacterToTile`` table, index-for-index against jpdasm's copy
+(both ROMs share the same table shape and character order, just
+different tile numbers) -- not recomputed from
+``RenderText_PerformVWFing``'s own tile-number formula (``tile = ((code &
+$F0) << 1) | (code & $0F)``), because the real game itself deviates from
+that formula for a few characters (digits use tiles 230-239, not a
+formula result; 'I' uses tile 175, a dedicated narrow-glyph slot, not the
+formula's 8) -- reading the real table directly matches the shipped game
+exactly; a formula guess doesn't, for those characters.
+
+``TheFont`` is NOT a single-height font -- each dialogue letter is
+genuinely 16px (2 VRAM tiles) tall: ``RenderText_PerformVWFing`` draws a
+"top" tile at its own tile number, then a "bottom" tile at ``tile number +
+16`` (its own ``LDA.b $0A / ADC.w #$0010`` right before the second half's
+row loop). This exactly mirrors ``Credits_CharacterToTile``'s own
+TOP/BOTTOM-slot-pairing convention (BOTTOM slot always == TOP slot + 16),
+so ``build_output`` copies both halves verbatim for every
+:data:`TOP_TILE_MAP` entry: JP slot -> US tile (top), JP slot + 16 -> US
+tile + 16 (bottom). No downsampling, no squashing, no posterizing --
+every earlier attempt at approximating a 2-tile source glyph into 1 tile
+of room, or at collapsing 4-value shading into 1 solid color, was solving
+a problem that doesn't exist once the SMALL role is simply left alone.
+
+The real fix for TOP/BOTTOM's own shading (credits' font palettes being
+degenerate for JP's own bold glyphs) is the CGRAM palette patch in
+``generate.py``'s ``credits_font_upload`` (only when ``--credits-font
+us``, leaving the shared ``Palettes_HUD`` table -- these CGRAM slots are
+NOT credits-specific, general sprite/HUD accent palettes also used for
+sword/shield glow effects elsewhere -- and JP's own degenerate-by-design
+palette 3 (SMALL role, now never repointed at US data) completely
+untouched) so ``TheFont``'s real shading renders correctly.
 
 Mirrors :mod:`jp_credits_font_asset`'s template-rendering shape.
 """
@@ -32,6 +70,7 @@ from __future__ import annotations
 from importlib import resources
 from string import Template
 
+from . import jp_credits_font_asset
 from .us_assets import US_ROM_MD5, asset
 
 #: Filename under ``bin/gfx/`` (both the graft's incbin path and the
@@ -42,46 +81,41 @@ FILENAME = "us_credits_font.2bpp"
 SIZE = 8192
 
 #: Expected md5 of the built output.
-OUTPUT_MD5 = "219a3c464df4472cb070c843575abb6e"
+OUTPUT_MD5 = "7c8da2ed3e128272e2337048653a1f5f"
 
-#: (JP credits tile slot -> source US TheFont tile), one entry per character
-#: JP's credits actually reference. A slot not listed here is left blank.
-TILE_MAP: dict[int, int] = {
-    320: 100,
-    321: 101,
-    322: 102,
-    323: 103,
-    324: 104,
-    325: 105,
-    326: 106,
-    327: 107,
-    328: 108,
-    329: 109,
+#: (JP credits TOP-role tile slot -> source US TheFont top-half tile), one
+#: entry per TOP half of each 2-tile location caption character JP's
+#: credits actually reference. Read directly off usdasm bank_0E's own
+#: ``Credits_CharacterToTile`` table (index-for-index against jpdasm's
+#: copy -- both ROMs share the same table shape/character order, just
+#: different tile numbers) rather than recomputed from
+#: ``RenderText_PerformVWFing``'s formula: the real game deviates from
+#: that formula for a few characters (digits use tiles 230-239, not a
+#: formula result; 'I' uses tile 175, a dedicated narrow-glyph slot, not
+#: the formula's 8) -- reading the table directly matches the real
+#: shipped game exactly, formula guesses don't. The generated extractor
+#: also copies each entry's BOTTOM half (JP slot + 16 -> US tile + 16) --
+#: see module docstring. A slot not listed here is left blank.
+TOP_TILE_MAP: dict[int, int] = {
+    320: 230,
+    321: 231,
+    322: 232,
+    323: 233,
+    324: 234,
+    325: 235,
+    326: 236,
+    327: 237,
+    328: 238,
+    329: 239,
     330: 0,
     331: 1,
     332: 2,
     333: 3,
     334: 4,
     335: 5,
-    336: 100,
-    337: 101,
-    338: 102,
-    339: 103,
-    340: 104,
-    341: 105,
-    342: 106,
-    343: 107,
-    344: 108,
-    345: 109,
-    346: 0,
-    347: 1,
-    348: 2,
-    349: 3,
-    350: 4,
-    351: 5,
     352: 6,
     353: 7,
-    354: 8,
+    354: 175,
     355: 9,
     356: 10,
     357: 11,
@@ -95,64 +129,12 @@ TILE_MAP: dict[int, int] = {
     365: 35,
     366: 36,
     367: 37,
-    368: 6,
-    369: 7,
-    370: 8,
-    371: 9,
-    372: 10,
-    373: 11,
-    374: 12,
-    375: 13,
-    376: 14,
-    377: 15,
-    378: 32,
-    379: 33,
-    380: 34,
-    381: 35,
-    382: 36,
-    383: 37,
     384: 38,
     385: 39,
     386: 40,
     387: 41,
     391: 110,
-    400: 38,
-    401: 39,
-    402: 40,
-    403: 41,
-    407: 110,
-    415: 0,
     424: 161,
-    425: 130,
-    432: 1,
-    433: 2,
-    436: 3,
-    437: 4,
-    438: 5,
-    439: 6,
-    440: 161,
-    441: 161,
-    442: 128,
-    443: 129,
-    476: 7,
-    477: 8,
-    478: 9,
-    479: 10,
-    496: 11,
-    497: 12,
-    498: 13,
-    499: 14,
-    500: 15,
-    501: 32,
-    502: 33,
-    503: 34,
-    504: 35,
-    505: 36,
-    506: 37,
-    507: 38,
-    508: 39,
-    509: 40,
-    510: 41,
 }
 
 
@@ -176,17 +158,21 @@ def render_binextract_us_credits_font() -> str:
     can never disagree, since both come from here. Reads US ``TheFont``'s
     own ROM slice directly (:func:`us_assets.asset`'s ``us_font.2bpp``
     offsets), not the already-extracted file, so extraction order between
-    scripts is never a dependency.
+    scripts is never a dependency -- unlike the JP credits font baseline
+    (:data:`jp_credits_font_asset.FILENAME`), which this DOES read
+    already-extracted (``deploy/binextract.py`` guarantees that script
+    runs first).
     """
     font_asset = asset("us_font.2bpp")
     (font_slice,) = font_asset.slices
     tile_map_lines = "\n".join(
-        f"    {slot}: {tile}," for slot, tile in sorted(TILE_MAP.items())
+        f"    {slot}: {tile}," for slot, tile in sorted(TOP_TILE_MAP.items())
     )
     return _load_template().substitute(
         us_rom_md5=repr(US_ROM_MD5),
         output_md5=repr(OUTPUT_MD5),
         us_font_offset=hex(font_slice.offset),
         us_font_size=hex(font_slice.length),
-        tile_map="{\n" + tile_map_lines + "\n}",
+        top_tile_map="{\n" + tile_map_lines + "\n}",
+        jp_credits_font_filename=repr(jp_credits_font_asset.FILENAME),
     )

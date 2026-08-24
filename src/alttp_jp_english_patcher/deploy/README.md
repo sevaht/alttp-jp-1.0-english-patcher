@@ -38,15 +38,21 @@ correctly; pass `--no-intro-fix` when generating to keep JP 1.0's original
 
 ### Credits
 
-By default, the ending credits keep JP 1.0's own (bolder) font rather than
-being converted to the US Latin font used everywhere else — JP's credits
-text is already English, and its font reads better than a straight
-conversion would, so the credits intentionally look different from the
-rest of the game. Pass `--credits-font us` when generating to use the US
-dialogue font there instead, matching the rest of the game's look; either
-way, this is computed offline (no runtime decompression, no emulator) from
-your own ROMs at extraction time (`binextract-jp-credits-font.py` /
-`binextract-us-credits-font.py`), never committed. By default this build
+Credits actually uses two fonts: a bold, 1-tile-tall font for the yellow
+location subtitles (e.g. "THE RETURN OF THE KING") that's pixel-identical
+between the JP and US ROMs — never regionalized, so it always renders the
+same regardless of this option — and a separate, 2-tile-tall font for the
+white location names (e.g. "HYRULE CASTLE") that genuinely differs: JP
+1.0's own bolder glyphs vs. the US ROM's own dialogue font. By default
+this build keeps JP 1.0's own bolder version of that second font — JP's
+credits text is already English, and its font reads better than a
+straight conversion would, so the credits intentionally look different
+from the rest of the game. Pass `--credits-font us` when generating to
+use the US dialogue font there instead, matching the rest of the game's
+look; either way, this is computed offline (no runtime decompression, no
+emulator) from your own ROMs at extraction time
+(`binextract-jp-credits-font.py` / `binextract-us-credits-font.py`),
+never committed. By default this build
 also fixes a handful of JP 1.0 translation mistakes to match the US
 release: "THE LOYAL PRIEST" → "THE LOYAL SAGE", "FINGER WEBS FOR SALE" →
 "FLIPPERS FOR SALE" (centered — the US release left it off-center),
@@ -184,10 +190,16 @@ Then run `python3 binextract.py`, which drives all four extractors:
   display are unpacked (everything else — almost all of it, JP's kanji/kana
   that nothing in this build reads anymore — is skipped); the original
   compressed asset is untouched either way, still sitting in the base ROM.
-* `binextract-us-credits-font.py` — a US-styled alternate for that same font
-  (`us_credits_font.2bpp`, from `alttp-us.sfc`; only used with
-  `--credits-font us`), same tile layout, each character's pixel data
-  instead pulled from the US dialogue font.
+* `binextract-us-credits-font.py` — a US-styled alternate for the white
+  location-name font only (`us_credits_font.2bpp`, from `alttp-us.sfc` and
+  the already-built `jp_credits_font.2bpp`; only used with `--credits-font
+  us`), same tile layout: starts as an exact copy of `jp_credits_font.2bpp`
+  (the yellow subtitle font is pixel-identical between ROMs, so those
+  tiles are never touched) and overwrites only the white font's tiles with
+  the US ROM's own dialogue font, at the tile numbers its real credits
+  code actually uses (read from the US ROM's own character table, not
+  recomputed) — so it must run after `binextract-jp-credits-font.py`
+  (`binextract.py` already runs them in that order).
 
 Nothing copyrighted is committed here — everything under `bin/` is
 regenerated from your ROMs.

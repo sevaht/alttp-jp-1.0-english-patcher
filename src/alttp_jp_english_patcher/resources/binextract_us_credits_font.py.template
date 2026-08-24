@@ -1,28 +1,37 @@
 #!/usr/bin/env python3
 """
-binextract-us-credits-font.py -- build a US-styled alternate for the credits'
-font, in the exact same tile-slot layout as jp_credits_font.2bpp (see
-binextract-jp-credits-font.py), from your own US ROM. Nothing copyrighted is
-committed to this repo; the `binextract.py` stub runs this (alongside
-binextract-jp.py, binextract-us.py, binextract-jp-credits-font.py) to produce
-`bin/gfx/us_credits_font.2bpp`.
+binextract-us-credits-font.py -- build a US-styled alternate for credits'
+TOP/BOTTOM (2-tile, white) location-caption font, in the exact same
+tile-slot layout as jp_credits_font.2bpp (see binextract-jp-credits-font.py),
+from your own US ROM. Nothing copyrighted is committed to this repo; the
+`binextract.py` stub runs this (alongside binextract-jp.py, binextract-us.py,
+binextract-jp-credits-font.py, always AFTER binextract-jp-credits-font.py --
+this script reads its output) to produce `bin/gfx/us_credits_font.2bpp`.
 
     python3 binextract-us-credits-font.py              # uses ./alttp-us.sfc
     python3 binextract-us-credits-font.py --us-rom US.sfc
 
 You need the US ROM (md5 $us_rom_md5), by default named `alttp-us.sfc` in
-this directory.
+this directory, AND bin/gfx/jp_credits_font.2bpp already built (binextract.py
+guarantees the order; running this standalone out of order will fail loudly).
 
-Every character JP 1.0's credits actually display (see Credits_CharacterToTile,
-bank_0E) is looked up by its US dialogue-font (TheFont) tile instead of JP's
-own bold glyph, then written to the SAME tile slot jp_credits_font.2bpp uses
-for that same character -- so credits can load either file interchangeably
-(--credits-font jp/us) with no other code changes: same slot numbers, same
-Credits_CharacterToTile table, same CreditsTextLine data, just different
-pixel data at each slot. Tile slots this build never references (no JP
-credits text uses them) are left blank. NO emulator is used -- this is a
-plain table-driven byte copy from the US ROM's own font asset. Output is
-verified against a known md5; the script stops loudly if it doesn't match.
+Credits has two fonts, not one, and only one of them is region-specific.
+The SMALL (1-tile, yellow) captions use a bold font that's pixel-identical
+between the JP and US ROMs -- nothing to swap, nothing built here. The
+TOP/BOTTOM (2-tile, white) location captions are the genuinely
+region-specific one: JP 1.0's own bolder glyphs vs. the US ROM's own
+TheFont (its regular dialogue VWF font -- confirmed live, the real US ROM's
+Credits_InitializeTheActualCredits calls TransferFontToVRAM directly for
+credits, no separate compressed credits-only asset on the US side).
+
+So the output here is NOT a font built from scratch: it starts as an exact
+copy of the already-built jp_credits_font.2bpp (every slot, SMALL role
+included, comes through unchanged), then overwrites only the TOP-role
+slots TOP_TILE_MAP lists with the corresponding US TheFont tiles (both
+halves -- TheFont's own letters are genuinely 16px/2-tile tall, tile N =
+top half, tile N+16 = bottom half). Tile slots TOP_TILE_MAP doesn't list
+are untouched JP data, not blank. Output is verified against a known md5;
+the script stops loudly if it doesn't match.
 
 GENERATED from alttp_jp_english_patcher/us_credits_font_asset.py -- do not
 hand-edit; change that module and redeploy to regenerate this file.
@@ -34,20 +43,25 @@ OUT = os.path.join(HERE, "bin", "gfx")
 
 US_ROM_MD5 = $us_rom_md5
 OUTPUT_MD5 = $output_md5
+JP_CREDITS_FONT_FILENAME = $jp_credits_font_filename
 
 # US TheFont lives at this ROM offset (see us_assets.py's "us_font.2bpp"
 # slice) -- read directly here rather than depending on that file already
 # having been extracted, since extraction order between scripts isn't
-# guaranteed.
+# guaranteed for this one (unlike JP_CREDITS_FONT_FILENAME, see below).
 US_FONT_OFFSET = $us_font_offset
 US_FONT_SIZE = $us_font_size
 
-# (JP credits tile slot -> source US TheFont tile) for every character JP's
-# credits actually reference (Credits_CharacterToTile, bank_0E); a slot not
-# listed here is left blank (0x00) -- either JP's own blank fill tile, or a
-# character (the "*BULLET*" green list-marker) with no US dialogue-font
-# equivalent.
-TILE_MAP = $tile_map
+# (JP credits TOP-role tile slot -> source US TheFont top-half tile) for
+# every 2-tile location-caption character JP's credits actually reference,
+# read directly off the real US Credits_CharacterToTile table (usdasm
+# bank_0E) -- not a formula guess, the real game deviates from the formula
+# for a few characters (digits, 'I'). TheFont's own letters are genuinely
+# 16px (2 tiles) tall -- RenderText_PerformVWFing (usdasm bank_0E) draws a
+# "top" tile at this number, then a "bottom" tile at tile+16 -- so both
+# halves get copied verbatim: JP slot -> tile (top), JP slot+16 -> tile+16
+# (bottom).
+TOP_TILE_MAP = $top_tile_map
 
 
 def md5(b):
@@ -71,13 +85,21 @@ def check_rom(path):
     print(f"  US ROM ok ({got})")
 
 
-def build_output(us_rom_bytes):
+def build_output(us_rom_bytes, jp_credits_font_bytes):
+    # Start from JP's own already-built credits font verbatim -- SMALL role
+    # (and anything else TOP_TILE_MAP doesn't list) is untouched JP data,
+    # not re-derived here.
+    out = bytearray(jp_credits_font_bytes)
+    # TheFont's own 4-value shading is preserved as-is -- the CGRAM palette
+    # patch in generate.py's credits_font_upload (only when --credits-font
+    # us) is what makes it render correctly, not any pixel-level change
+    # here.
     font = us_rom_bytes[US_FONT_OFFSET : US_FONT_OFFSET + US_FONT_SIZE]
-    out = bytearray(8192)
-    for jp_slot, us_tile in TILE_MAP.items():
-        src = us_tile * 16
-        dst = jp_slot * 16
-        out[dst : dst + 16] = font[src : src + 16]
+    for jp_slot, us_tile in TOP_TILE_MAP.items():
+        for half in (0, 16):
+            src = (us_tile + half) * 16
+            dst = (jp_slot + half) * 16
+            out[dst : dst + 16] = font[src : src + 16]
     return bytes(out)
 
 
@@ -98,9 +120,18 @@ def main():
     check_rom(a.us_rom)
     os.makedirs(OUT, exist_ok=True)
 
+    jp_credits_font_path = os.path.join(OUT, JP_CREDITS_FONT_FILENAME)
+    if not os.path.isfile(jp_credits_font_path):
+        die(
+            f"{JP_CREDITS_FONT_FILENAME} not found in {OUT} -- run"
+            " binextract-jp-credits-font.py first (binextract.py does this"
+            " automatically, in order)"
+        )
+
     print("Building US-styled credits font:")
     us_rom_bytes = open(a.us_rom, "rb").read()
-    data = build_output(us_rom_bytes)
+    jp_credits_font_bytes = open(jp_credits_font_path, "rb").read()
+    data = build_output(us_rom_bytes, jp_credits_font_bytes)
     got = md5(data)
     out = os.path.join(OUT, "us_credits_font.2bpp")
     open(out, "wb").write(data)
