@@ -14,7 +14,11 @@ round-trip per line.
 Two hard limits, cross-verified two independent ways (ROM buffer geometry,
 and hand-summing a known-overflowing vanilla line -- see WidthTable):
 
-* MAX_LINE_WIDTH = 168px (21 tiles) per line.
+* MAX_LINE_WIDTH = 176px (22 tiles) per line -- generate.py's
+  --wide-dialogue-lines (landed 2026-09-08) widens the VWF's per-line
+  buffer to match, since the dialog box's own border was already drawn
+  this wide and only the text engine's own buffer was narrower. This tool
+  assumes that flag is always on, matching how the script is now authored.
 * There is NO automatic line-wrap in the SNES engine. Line breaks are
   hardcoded per-message by $73/$74/$75/$76 control codes in the data; an
   edited line that's too wide silently corrupts into the next line's tile
@@ -62,13 +66,20 @@ class WidthTable:
     "db   6,  7,  7,  7,  7,  4"` replace, code $4C 8px -> 6px) so this
     tool's numbers match what actually ships, not the vanilla US table.
 
-    MAX_LINE_WIDTH (168px = 21 tiles) is the VWF render buffer's real hard
-    limit -- there is no auto-wrap, a line past this corrupts into the next
-    line's tile buffer. Verified two independent ways: the buffer's own
+    MAX_LINE_WIDTH (176px = 22 tiles, with generate.py's
+    --wide-dialogue-lines) is the VWF render buffer's real hard limit --
+    there is no auto-wrap, a line past this corrupts into the next line's
+    tile buffer (or, for a page's 3rd line, off the end of VRAM -- both
+    guarded against by that same patch). The vanilla (pre-widening) limit
+    was 168px = 21 tiles, verified two independent ways: the buffer's own
     per-line stride ($150 bytes / 16 bytes-per-tile-row = 21 tiles * 8px),
     and by hand-summing the known vanilla-overflow line `said, "Once I have
     finished with` using the table's UNPATCHED 8px quote width, which comes
-    to exactly 169 -- one pixel over.
+    to exactly 169 -- one pixel over. Confirmed live (Mesen, a VRAM dump,
+    and the disassembly) that the dialog box's own border was already
+    drawn 22 tiles wide the whole time -- only the text engine's own
+    buffer was narrower -- so widening it to match doesn't touch anything
+    else on screen.
 
     `[LINK]` is the disassembly's stand-in for the $6A "insert player name"
     control code -- at runtime this is whatever 1-6 character name the
@@ -134,7 +145,7 @@ class WidthTable:
 
     ROM_OFFSET = 0x74ADF
     TABLE_SIZE = 0x63  # 99 bytes, codes $00-$62
-    MAX_LINE_WIDTH = 168
+    MAX_LINE_WIDTH = 176  # 22 tiles, with generate.py's --wide-dialogue-lines
 
     _QUOTE_CODE = 0x4C
     _PATCHED_QUOTE_WIDTH = 6  # generate.py's engine.replace(...) patch
