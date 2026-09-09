@@ -16,6 +16,7 @@ alttp-us.sfc
 # Local convenience scripts (personal target paths, not part of the package).
 patch-baseline.sh
 patch-full.sh
+start-script-reviewer.local.sh
 
 # tools/: built binaries, downloaded emulator/core, capture artifacts (see
 # tools/README.md). link_intro.srm is a deliberate test fixture, not a build
@@ -28,3 +29,8 @@ tools/*.ppm
 tools/*.png
 tools/*.bin
 !tools/link_intro.srm
+# gba_script_diff.py output (ROM-derived copyrighted game text -- --out
+# already refuses an in-repo path, this is belt-and-braces).
+tools/*.html
+tools/wording.txt
+tools/full.txt

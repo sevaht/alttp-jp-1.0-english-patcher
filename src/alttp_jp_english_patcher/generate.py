@@ -298,6 +298,7 @@ def flute_to_ocarina_dialogue_fixes(main: Assembly) -> None:
         until="#_1CCD10:",
     )
 
+
 def flute_to_ocarina_overflow_fix(overflow: Assembly) -> None:
     """The one of the 10 dialogue occurrences (Message_0183) that falls
     past ``Message_DataExtra`` (bank $0E addressing) rather than in
@@ -391,9 +392,7 @@ def gba_dialogue_text_fixes(main: Assembly) -> None:
             datas(["db $D8, $59, $2C, $1A, $20, $1E, $2C, $41 ; the sages."]),
             until=brk,
         )
-        main.splice(
-            after, datas(["db $08, $59, $DF, $27 ; I wan"]), until=end
-        )
+        main.splice(after, datas(["db $08, $59, $DF, $27 ; I wan"]), until=end)
     # "of the wise[scroll]men..." -> "of the[scroll]sages..." (the message's
     # last line, so the shortened word just becomes its own line).
     main.splice(
@@ -443,21 +442,13 @@ def gba_dialogue_text_fixes(main: Assembly) -> None:
                 "#_1C95DC: db $59, $D0, $2F, $A0, $2C, $1A, $20, $1E",
                 1,
             ),
-            (
-                "#_1C95E4: db $27",
-                "#_1C95E4: db $2C",
-                1,
-            ),
+            ("#_1C95E4: db $27", "#_1C95E4: db $2C", 1),
             (  # Message_0039: same passage, verbatim
                 "#_1C98BE: db $59, $D0, $2F, $A0, $E2, $D0, $59, $BE",
                 "#_1C98BE: db $59, $D0, $2F, $A0, $2C, $1A, $20, $1E",
                 1,
             ),
-            (
-                "#_1C98C6: db $27",
-                "#_1C98C6: db $2C",
-                1,
-            ),
+            ("#_1C98C6: db $27", "#_1C98C6: db $2C", 1),
             (  # Message_003A: "of the wise men.   THE KING" -> "...sages..."
                 "#_1C99B4: db $C6, $59, $D8, $59, $E2, $D0, $59, $BE",
                 "#_1C99B4: db $C6, $59, $D8, $59, $2C, $1A, $20, $1E",
@@ -1478,9 +1469,7 @@ def credits_font_upload(
                     instruction("JSL PaletteLoad_HUD"),
                     *credits_font_palette_patch,
                     instruction("SEP #$20"),
-                    instruction(
-                        f"JML ${overworld_palette_load_call + 4:06X}"
-                    ),
+                    instruction(f"JML ${overworld_palette_load_call + 4:06X}"),
                 ]
             ).ensure_anchors(),
             0x20B120,
@@ -3345,7 +3334,9 @@ def _address_of_pool_line(english: Rom, name: str, needle: str) -> int:
     return address
 
 
-def mothula_damage_bugfix(*, changes: bool, fix_mothula_bugs: bool = False) -> Relocation:
+def mothula_damage_bugfix(
+    *, changes: bool, fix_mothula_bugs: bool = False
+) -> Relocation:
     """Bank ``$29`` (free space): fixes Mothula (sprite ``$88``, Skull
     Woods) being immune to golden-sword swings/dashes, tempered-sword spin
     attacks, and golden-sword spin attacks -- with full GBA parity (the
@@ -3777,9 +3768,7 @@ def apply_base_edits(
             english, "CheckSwordDamageToSprite", "LDA.b #$9D"
         )
         english.relocate_block(
-            redirect_address,
-            "EN_MothulaClassRedirect",
-            resume=resume_address,
+            redirect_address, "EN_MothulaClassRedirect", resume=resume_address
         )
         # Redirect right before CheckSpriteTileProperty's (bank_06) class-4
         # spike-floor damage attempt (LDA.b #$04 / JSL, 6 bytes total --

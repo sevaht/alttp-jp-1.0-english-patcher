@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Script Reviewer</title>
+<link rel="stylesheet" href="reviewer.css">
+</head>
+<body>
+<header>
+  <strong>Script Reviewer</strong>
+  <input id="filter" placeholder="filter (id or text)&hellip;">
+  <label class="hide-completed"><input type="checkbox" id="hide-completed"> hide completed</label>
+  <span class="count" id="count"></span>
+  <span class="save-indicator" id="save-indicator"></span>
+</header>
+<p class="note">
+  Widths/overflow are computed from the real SNES VWF engine's own per-character
+  width table (168px hard line limit, no auto-wrap -- see script_reviewer.py).
+  The GBA panel is rendered using the <em>SNES</em> font/widths, not a GBA-accurate
+  render -- it shows how that wording would look in <em>our</em> textbox.
+  Newlines you type in the Proposed field become in-game line breaks.
+</p>
+<div class="column-headers" id="column-headers">
+  <span>US SNES</span>
+  <span>Proposed</span>
+  <span>GBA</span>
+</div>
+<div id="rows"></div>
+<script src="reviewer.js"></script>
+</body>
+</html>
