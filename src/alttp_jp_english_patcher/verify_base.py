@@ -46,6 +46,7 @@ def _reference_source_path() -> Path:
 BASE_BANKS = (
     "bank_00",
     "bank_02",
+    "bank_09",
     "bank_0C",
     "bank_0D",
     "bank_0E",

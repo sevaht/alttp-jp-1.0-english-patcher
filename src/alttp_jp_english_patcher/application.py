@@ -290,6 +290,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "so this is not a full GBA-parity fix, just this specific bug",
     )
     parser.add_argument(
+        "--wide-dialogue-lines",
+        action="store_true",
+        help="widen every dialogue line's pixel budget from 168px (21 "
+        "tiles) to 176px (22 tiles), reclaiming a column the dialog box's "
+        "own border was already drawn wide enough for but the text engine "
+        "never used; by default this patcher leaves the original 168px "
+        "limit in place",
+    )
+    parser.add_argument(
         "--no-gba-text-fixes",
         action="store_true",
         help="keep the original US translation's wording in dialogue, the "
@@ -390,6 +399,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         low_health_beep=not args.no_low_health_beep,
         flute_is_ocarina=args.flute_is_ocarina,
         fix_mothula_bugs=args.fix_mothula_bugs,
+        wide_dialogue_lines=args.wide_dialogue_lines,
         null_padbyte_threshold=args.null_padbyte_threshold,
         nop_padbyte_threshold=args.nop_padbyte_threshold,
     )

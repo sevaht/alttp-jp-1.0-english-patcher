@@ -305,7 +305,8 @@ def flute_to_ocarina_overflow_fix(overflow: Assembly) -> None:
     ``main`` -- see :func:`flute_to_ocarina_dialogue_fixes`.
     """
     overflow.splice(
-        "#_0EEB8D:",  # Message_0183: "animals with his Flute." -> "...Ocarina."
+        # Message_0183: "animals with his Flute." -> "...Ocarina."
+        "#_0EEB8D:",
         datas(
             [
                 "db $B0, $2C, $59, $0E, $1C, $1A, $2B, $22, $27, $1A"
@@ -519,6 +520,7 @@ def text(
     changes: bool,
     gba_text_fixes: bool = True,
     flute_is_ocarina: bool = False,
+    wide_dialogue_lines: bool = False,
     nop_padbyte_threshold: int = DEFAULT_NOP_PADBYTE_THRESHOLD,
 ) -> Relocation:
     """The US text subsystem: the VWF font (bank ``$20``), the message engine
@@ -534,7 +536,10 @@ def text(
     the US translation's original wording untouched. ``flute_is_ocarina``
     (also only meaningful alongside ``changes``) applies :func:`flute_to_
     ocarina_dialogue_fixes`; ``True`` renames "Flute" to "Ocarina" (the JP
-    original's name) everywhere it occurs in dialogue.
+    original's name) everywhere it occurs in dialogue. ``wide_dialogue_lines``
+    (only meaningful alongside ``changes``) widens the VWF's per-line pixel
+    budget from 168px (21 tiles) to 176px (22 tiles) on all 3 lines -- see
+    the edit below for why this is safe.
     """
     us, jp = sources.us, sources.jp
     engine = us.extract(
@@ -606,6 +611,158 @@ def text(
     engine.replace(
         "db   8,  7,  7,  7,  7,  4", "db   6,  7,  7,  7,  7,  4", 1
     )
+
+    # [ENG-TEXT] optional: widen the VWF's per-line pixel budget 168px ->
+    # 176px (21 -> 22 tiles) on all 3 lines. The dialog box's own border is
+    # already drawn 22 tiles wide (RenderText_DrawBorderRow's middle-fill
+    # loop repeats the same filler tile $0016 = 22 times between the two
+    # corner tiles); only the text engine's own per-line tile budget was
+    # narrower, leaving the box's own rightmost interior column always
+    # blank (confirmed live: Mesen's tilemap viewer showed the same $7F
+    # filler tile used for that blank column, not a border/corner tile,
+    # immediately past the 21st column -- the box was never actually built
+    # 21 tiles wide, the text just never used its 22nd).
+    #
+    # The extra 6 tiles this needs (2 tiles/line x 3 lines, since each
+    # character is a top+bottom tile pair) were confirmed, via a live VRAM
+    # dump (Mesen's Memory Tools, Video RAM export) taken mid-dialog, to
+    # fall inside NMI_UploadGameOverText's own declared ranges (bank_00:
+    # $F000-$F800 and $FA00-$FFFF) rather than TheFont's ($E000-$F000,
+    # confirmed untouched by anything else). Reusing them is safe because
+    # dialog boxes and the Game Over screen are never on screen at once, and
+    # each fully rewrites its own claimed tiles every time it becomes active
+    # (RenderText_BuildCharacterTilemap sweeps and reassigns every one of
+    # its tiles on every new page; NMI_UploadGameOverText re-uploads its own
+    # tiles on every entry to that screen) -- so whichever one drew there
+    # last is irrelevant once the other one takes over. Specifically: this
+    # shifts the buffer's own first tile 6 tiles earlier (into the last 6 of
+    # NMI_UploadGameOverText's first chunk), keeping its last tile exactly
+    # where it already was (already flush against that same screen's second
+    # chunk).
+    #
+    # Two widening attempts here in the past (a uniform 3-row one and a
+    # smaller single-row one) both corrupted this shared VRAM region and
+    # were reverted -- both predate this VRAM dump, and neither accounted
+    # for reclaiming space this way; they simply grew the buffer without
+    # anywhere new for it to go.
+    if changes and wide_dialogue_lines:
+        # Per-half-line (top or bottom tile row) byte budget: 21 tiles * 16
+        # bytes/tile -> 22 * 16.
+        engine.replace("ADC.w #$0150", "ADC.w #$0160", 1)
+        # Per-line WRAM staging-buffer stride (top+bottom halves together):
+        # 672 -> 704 bytes/line, so all 3 lines still land back-to-back.
+        engine.replace("dw $0000, $02A0, $0540", "dw $0000, $02C0, $0580", 1)
+        # RenderText_BuildCharacterTilemap's tile-number sweep: 126 -> 132
+        # tiles (3 lines * 22 columns * 2 halves).
+        engine.replace("CPX.w #$00FC", "CPX.w #$0108", 1)
+        # RenderText_DrawACharacter copies that many tile NUMBERS into the
+        # screen tilemap per row (6 rows: 3 lines * top/bottom) before
+        # advancing to the next screen row -- a separate hardcoded 21 from
+        # the ones above, governing placement rather than pixel data. Left
+        # at 21 this silently drifts every row: only 21 of each row's 22
+        # numbers land before the loop moves to the next screen row, so the
+        # 22nd trails into the next row's first slot, and the error
+        # compounds line over line (confirmed live: exactly the growing
+        # top/bottom misalignment this fixes). Its paired DMA-stripe header
+        # a few bytes later declares that row's own transfer size the same
+        # way RenderText_BorderTiles' rows do (confirmed against usdasm's
+        # own annotation on an unrelated but identically-encoded stripe:
+        # "$2900 | 42 bytes" -- i.e. (byte-swapped-and-masked value) + 1 ==
+        # bytes; 21 tiles * 2 bytes/tile == 42): 42 -> 44 bytes (22 tiles),
+        # which is $2900 -> $2B00 the same way.
+        engine.replace("LDA.w #$0015", "LDA.w #$0016", 1)
+        engine.replace("LDA.w #$2900", "LDA.w #$2B00", 1)
+        # The first built tile's number -- reset at message start and again
+        # after every in-message color-change command (ParseText_SetColor),
+        # both sites sharing this exact operand -- moves from 384 to 378:
+        # the buffer's first tile now sits 6 tiles earlier in VRAM (see
+        # above).
+        engine.replace("ORA.w #$0180", "ORA.w #$017A", 2)
+
+        # RenderText_EmptyBuffer zeroes the WRAM CHR staging buffer between
+        # messages by counting down from a fixed top index: 2000 ($07D0),
+        # i.e. tile 125 (the old last tile) * 16 bytes/tile. Left at the old
+        # value it only clears the first 2016 of the now-2112-byte buffer,
+        # leaving line 3's new 6 tail tiles (its own last column) with
+        # whatever pixel data an earlier, differently-shaped message left
+        # there. New top index: tile 131 (the new last tile) * 16 = 2096
+        # ($0830).
+        engine.replace("LDA.w #$07D0", "LDA.w #$0830", 1)
+
+        # RenderText_ScrollText (the $73 "scroll up one pixel row" op used
+        # between lines/pages) shifts every tile's 8 pixel rows up by one,
+        # refilling each tile's own newly-emptied last row from row 0 of the
+        # tile exactly one row-half-width ($0150 bytes, i.e. the old 21-tile
+        # top/bottom split) further into the buffer -- the same top<->bottom
+        # (and, cascading, line(N) bottom <-> line(N+1) top) relationship
+        # RenderText_PerformVWFing's own ADC above already needed fixing.
+        # Left at the old $0150 this pulls from a tile 1 column short of the
+        # right one -- confirmed live: exactly the growing per-scroll
+        # indent, since every scroll re-derives that column's content from
+        # one column left of where it should.
+        engine.replace("LDA.w $7F0150,X", "LDA.w $7F0160,X", 1)
+        # Its own loop bound (how far X walks before this shift is done)
+        # is the same old 2016-byte/126-tile total this whole edit is
+        # widening past: 2016 -> 2112 ($0840).
+        engine.replace("CMP.w #$07E0", "CMP.w #$0840", 1)
+        # After the shift, the newly-exposed bottom row of the *last*
+        # row-half (line 3's bottom-half tiles, which have no further tile
+        # to pull from) is explicitly zeroed rather than left with garbage
+        # read from past the buffer's end -- one STZ per tile, so this grows
+        # from 21 to 22 entries, and every address shifts to match the new
+        # buffer's own end (tile 131's row 7 is $7F083E, not $7F07DE).
+        engine.splice(
+            "STZ.w $7F07DE",
+            instructions(
+                f"STZ.w $7F{addr:04X}" for addr in range(0x083E, 0x06ED, -0x10)
+            ),
+            until="SEP #$30",
+        )
+
+        # Vanilla bug, unrelated to the widening itself but only reachable
+        # at the true end of a line: each glyph's own draw unconditionally
+        # spills a trailing overhang pixel one tile further ($7F0000,X,
+        # both halves) while finishing its OWN pixel data -- the font
+        # stores each glyph a hair wider than its declared advance, and
+        # this is that overhang, not the start of the next character. For
+        # every character but a line's last, the overhang lands in the
+        # next glyph's own not-yet-drawn slot and is absorbed; the actual
+        # last character on a line has no such neighbor, and this write has
+        # no bounds check, so it lands wherever the address arithmetic
+        # continues regardless of where the line's own budget ends. Add one
+        # here so the newly-legal 22nd column's own last character can't
+        # spill into the next line's buffer -- or, on line 3, off the end
+        # of VRAM entirely, now that line 3 runs flush to VRAM's own top.
+        for label, base in (("top", "$0726"), ("bottom", "$08")):
+            needle = f"BEQ .{label}_none_left"
+            spill_check = engine.lines[engine.find(needle) - 1]
+            if "LDA.b $04" not in str(spill_check):
+                msg = f"{needle}: expected LDA.b $04 immediately before it"
+                raise ValueError(msg)
+            engine.insert_before(
+                str(spill_check),
+                instructions(
+                    [
+                        "TXA",
+                        "SEC",
+                        f"SBC.w {base}",
+                        "CMP.w #$0160",
+                        f"BCS .{label}_none_left",
+                    ]
+                ),
+            )
+        # The check above pushes the top-half loop's own closing branch
+        # (BNE .top_next_row) out of an 8-bit relative branch's range (the
+        # bottom half already uses a long branch here for the same reason --
+        # widen the top half's short branch to match rather than trim the
+        # check above).
+        engine.splice(
+            "BNE .top_next_row",
+            [
+                *instructions(["BEQ .top_loop_done", "BRL .top_next_row"]),
+                note(".top_loop_done:"),
+            ],
+        )
 
     # (2) message-ID realignment, done in the ENGINE instead of the data. The
     # US has two messages JP lacks -- the Choose2High cursor prompts at IDs
@@ -3533,6 +3690,37 @@ def _wire_credits_overworld_palette_patch(
     )
 
 
+def _apply_dialogue_box_size_edit(
+    english: Rom, wide_dialogue_lines: bool
+) -> None:
+    """NMI_UploadBG3Text's text-CHR box size/destination (bank_00).
+
+    Unconditionally corrects JP 1.0's 120-tile box to the US ROM's 126;
+    ``wide_dialogue_lines`` widens it further to 132 (see :func:`text`'s own
+    edit for the full rationale) and shifts the VRAM destination 6 tiles
+    earlier to make room, since the size grew by that many bytes.
+    """
+    english.set_operand(
+        0x008D02,
+        "LDX.w #$0840" if wide_dialogue_lines else "LDX.w #$07E0",
+        comment=(
+            "[ENG-TEXT] widened 132-tile text box (was $07E0 / 126; JP "
+            "originally $0780 / 120)"
+            if wide_dialogue_lines
+            else "[ENG-TEXT] US 126-tile text box (was $0780 / 120)"
+        ),
+    )
+    if wide_dialogue_lines:
+        english.set_operand(
+            0x008CF1,
+            "LDY.w #$7BD0",
+            comment=(
+                "[ENG-TEXT] widened text-CHR buffer start "
+                "(was $7C00 / VRAM $F800)"
+            ),
+        )
+
+
 def apply_base_edits(
     english: Rom,
     *,
@@ -3544,6 +3732,7 @@ def apply_base_edits(
     low_health_beep: bool = True,
     fix_mothula_bugs: bool = False,
     credits_font: str = "jp",
+    wide_dialogue_lines: bool = False,
 ) -> None:
     """Apply the base edits that are not plain hooks (see _wire_hooks)."""
     # Save compatibility: invoke the migrator (in bank $2C) from bank_00's
@@ -3578,14 +3767,33 @@ def apply_base_edits(
         "LDA.w #$00A9",
         comment="[ENG-FS] US BG3 blank tile (was $0188 hex-pattern glyph)",
     )
-    english.set_operand(
-        0x008D02,
-        "LDX.w #$07E0",
-        comment="[ENG-TEXT] US 126-tile text box (was $0780 / 120)",
-    )
+    _apply_dialogue_box_size_edit(english, wide_dialogue_lines)
     english.set_operand(0x00E557, "LDA.b #TheFont>>16")
     english.set_operand(0x00E563, "LDA.w #TheFont")
     english.set_operand(0x00E568, "LDX.w #(TheFont_end-TheFont)/2-1")
+    # Game Over's "choice fairy" cursor (bank_09,
+    # GameOver_AnimateChoiceFairy) sits at a JP-only screen position:
+    # X=$3C/Y-table $81,$91,$A1 in JP 1.0 vs X=$34/Y-table $7F,$8F,$9F in the
+    # US ROM (confirmed live: JP's position overlaps the option text by 8px
+    # right / 2px down of the US ROM's, next to identical US-translated
+    # text either way -- this is a position-only JP/US difference, not tied
+    # to any text-width change). Unconditional, like the text-box-size fix
+    # above: this patcher's English translation is never optional, so
+    # neither is matching the US release's own cursor position for it.
+    english.set_operand(
+        0x09F67C,
+        "LDA.b #$34",
+        comment="[ENG-FS] US game-over fairy X (JP 1.0: $3C)",
+    )
+    english.set_operand(
+        0x09F674, "db $7F", comment="US game-over fairy Y 1/3 (JP 1.0: $81)"
+    )
+    english.set_operand(
+        0x09F675, "db $8F", comment="US game-over fairy Y 2/3 (JP 1.0: $91)"
+    )
+    english.set_operand(
+        0x09F676, "db $9F", comment="US game-over fairy Y 3/3 (JP 1.0: $A1)"
+    )
     if weathercock_fix:
         # The animated "weathercock" (windmill vane) VRAM tile ($1DE) cycles
         # between 3 pre-decompressed variants (a periodic DMA-source swap,
@@ -4470,6 +4678,7 @@ def build(
     low_health_beep: bool = True,
     flute_is_ocarina: bool = False,
     fix_mothula_bugs: bool = False,
+    wide_dialogue_lines: bool = False,
     null_padbyte_threshold: int = DEFAULT_NULL_PADBYTE_THRESHOLD,
     nop_padbyte_threshold: int = DEFAULT_NOP_PADBYTE_THRESHOLD,
 ) -> Rom:
@@ -4545,7 +4754,10 @@ def build(
     scaling every other class already has. Does not touch Mothula's own
     immunity to its room's spike hazards (see the function's docstring for
     why the two are linked) -- not a full GBA-parity fix, just this
-    specific reported bug.
+    specific reported bug. ``wide_dialogue_lines`` (also only meaningful
+    alongside ``changes``, default off) widens every dialogue line's pixel
+    budget from 168px (21 tiles) to 176px (22 tiles) -- see :func:`text`'s
+    own docstring/comment for why the extra VRAM is safe to reuse.
     """
     title_screen_on = us_title_screen and changes
     sources = Sources(
@@ -4558,6 +4770,7 @@ def build(
             changes=changes,
             gba_text_fixes=gba_text_fixes,
             flute_is_ocarina=flute_is_ocarina,
+            wide_dialogue_lines=wide_dialogue_lines,
             nop_padbyte_threshold=nop_padbyte_threshold,
         ),
         font_upload(sources, changes=changes),
@@ -4618,6 +4831,7 @@ def build(
             low_health_beep=low_health_beep,
             fix_mothula_bugs=fix_mothula_bugs,
             credits_font=credits_font,
+            wide_dialogue_lines=wide_dialogue_lines,
         )
         if intro_fix:
             apply_intro_fix(english)
