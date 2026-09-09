@@ -649,6 +649,7 @@ def main():
                      help="usdasm checkout (default: cached clone, same as gba_script_diff.py)")
     ap.add_argument("--port", type=int, default=8000)
     args = ap.parse_args()
+    state_path = args.state.resolve()
 
     usdasm_dir = args.usdasm
     if usdasm_dir is None:
