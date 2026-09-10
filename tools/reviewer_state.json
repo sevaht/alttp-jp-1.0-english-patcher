@@ -24,8 +24,8 @@
     "proposed": null
   },
   "14": {
-    "completed": false,
-    "proposed": "Unnh… [LINK], I didn't want\nyou involved in this…  I told\nyou not to leave the house…\nTake my sword and shield and\nlisten.  You can focus power in\nthe blade (hold the Ⓑ Button).\n…Then release it using the\nsecret technique handed down\nby our people…\n[LINK], you can do it!\nSave the Princess…\nY-you are the princess'… … …"
+    "completed": true,
+    "proposed": "Unnh… [LINK], I didn't want you\ninvolved in this…  I told you not\nto leave the house…\nTake my sword and shield and\nlisten.  You can focus power in\nthe blade (hold the Ⓑ Button).\n…Then release it using the\nsecret technique handed down\nby our people…\n[LINK], you can do it!\nSave the Princess…\nY-you are the princess'… … …"
   },
   "15": {
     "completed": true,
@@ -37,7 +37,7 @@
   },
   "17": {
     "completed": true,
-    "proposed": "You look strong for a kid.  How\nmuch can you lift?  (Press the\nⒶ Button when you're touching\nsomething to lift it.)"
+    "proposed": null
   },
   "18": {
     "completed": true,
@@ -53,7 +53,7 @@
   },
   "20": {
     "completed": true,
-    "proposed": null
+    "proposed": "You can often find valuables in\nchests.  (Press the Ⓐ Button in\nfront of a chest to open it.)"
   },
   "21": {
     "completed": true,
@@ -68,8 +68,8 @@
     "proposed": "Princess Zelda? You are safe!\nAnd you are the one who\nrescued her, [LINK]?"
   },
   "24": {
-    "completed": false,
-    "proposed": null
+    "completed": true,
+    "proposed": "I sense that a mighty evil force\nguides the wizard's actions and\naugments his magical power.\nThe only weapon potent enough\nto defeat the wizard is the\nlegendary Master Sword.\nIt is said that the village elder\nis a descendant of one of the\nseven sages.\nPerhaps he can tell you more.\nI will mark his house on your\nmap.  But we must take care!\nI am certain the castle soldiers\nare looking for you and the\nprincess now!  …    …    …\nI will hide Princess Zelda here.\nDo not worry!  Seek the elder!\n…    …    …\nDo you understand?\n> Yes\nNot at all"
   },
   "25": {
     "completed": true,
@@ -79,13 +79,29 @@
     "completed": true,
     "proposed": "Take the three Pendants into\nthe Lost Woods.  The Master\nSword awaits you there!"
   },
+  "27": {
+    "completed": true,
+    "proposed": "[LINK]!  If only you had come\nsooner…  A group of soldiers was\nhere…\nThey took Zelda!  I fear they\nhave taken her to the highest\nroom in the castle tower.\nYou must find her before the\nwizard works his magic.\nPlease… You are our only hope…"
+  },
   "28": {
     "completed": true,
     "proposed": null
   },
+  "29": {
+    "completed": true,
+    "proposed": "Yes, it was [LINK] who helped\nme escape from the dungeon!\nWhen I was captive the wizard\nsaid, \"Once I have finished\nwith you, the final one, the\nsages' seal will open.\"\n…    …    …\n[LINK], you must not let the\nland of Hyrule fall into the\nwizard's clutches.\nIf he breaks the seal of the\nseven sages, a wave of evil\npower will overwhelm this land.\nBefore that happens…\nBefore it's too late… Please!\nYou must defeat the wizard\nbefore he destroys all of Hyrule!\nYou can…  You must!"
+  },
   "3": {
     "completed": true,
     "proposed": null
+  },
+  "30": {
+    "completed": true,
+    "proposed": "Be careful, [LINK]!\nI know you can save Hyrule!"
+  },
+  "31": {
+    "completed": true,
+    "proposed": "Help me…\nPlease help me…\nI am a prisoner in the dungeon\nof the castle.\nMy name is Zelda.\nThe wizard, Agahnim, has done\nsomething terrible to the other\nmissing girls.\nNow only I remain…\nAgahnim has seized control of\nthe castle and is trying to open\nthe sages' seal.\n…    …\nI am in the castle dungeon.\nPlease help me…"
   },
   "32": {
     "completed": true,
@@ -93,7 +109,7 @@
   },
   "33": {
     "completed": true,
-    "proposed": "There is a secret passage in\nthe throne room that leads to\nthe Sanctuary.  I'm sure the\nold man there will help us."
+    "proposed": "There is a secret passage in\nthe throne room that leads to\nthe Sanctuary.\nI'm sure the old man there will\nhelp us.  We must hurry!"
   },
   "34": {
     "completed": true,

@@ -96,31 +96,53 @@ class GlyphRenderer {
     return tokens;
   }
 
+  /** Pixel-width contribution of one token in isolation (0 for a
+   * badBracket or an unmeasurable/unknown glyph -- lineWidth() and
+   * firstWordWidth() both flag those separately rather than fold them into
+   * a width number). */
+  _tokenWidth(tok) {
+    if (tok.kind === "name") return this.nameChars * this.maxNameCharWidth;
+    if (tok.kind === "digit") return this.maxDigitWidth;
+    if (tok.kind === "opTag") return this.widths[this.gbaOpPlaceholderCode];
+    if (tok.kind === "linkFace") {
+      return this.linkFaceCodes.reduce((sum, c) => sum + this.widths[c], 0);
+    }
+    if (tok.kind === "rawCode") return this.widths[tok.code];
+    if (tok.kind === "badBracket") return 0;
+    const code = this.codeOf[tok.ch];
+    return code === undefined ? 0 : this.widths[code];
+  }
+
   /** [pixel width, sorted unmeasurable chars, bad-bracket chars found]. */
   lineWidth(text) {
     let width = 0;
     const unknown = new Set();
     const badBrackets = [];
     for (const tok of this.tokenize(text)) {
-      if (tok.kind === "name") {
-        width += this.nameChars * this.maxNameCharWidth;
-      } else if (tok.kind === "digit") {
-        width += this.maxDigitWidth;
-      } else if (tok.kind === "opTag") {
-        width += this.widths[this.gbaOpPlaceholderCode];
-      } else if (tok.kind === "linkFace") {
-        width += this.linkFaceCodes.reduce((sum, c) => sum + this.widths[c], 0);
-      } else if (tok.kind === "rawCode") {
-        width += this.widths[tok.code];
-      } else if (tok.kind === "badBracket") {
+      if (tok.kind === "badBracket") {
         badBrackets.push(tok.ch);
+      } else if (tok.kind === "char" && this.codeOf[tok.ch] === undefined) {
+        unknown.add(tok.ch);
       } else {
-        const code = this.codeOf[tok.ch];
-        if (code === undefined) unknown.add(tok.ch);
-        else width += this.widths[code];
+        width += this._tokenWidth(tok);
       }
     }
     return [width, [...unknown].sort(), badBrackets];
+  }
+
+  /** Pixel width of `text`'s first space-delimited "word" -- tokenize()
+   * first so a bracketed placeholder token (e.g. a multi-argument
+   * `[OP:...]` tag) is never split on a literal space inside its own
+   * brackets. 0 for an empty line or one starting with a space. Used for
+   * the reflow marker: "would the next line's first word fit on this
+   * line?" is a real per-word question, not a per-character one. */
+  firstWordWidth(text) {
+    let width = 0;
+    for (const tok of this.tokenize(text)) {
+      if (tok.kind === "char" && tok.ch === " ") break;
+      width += this._tokenWidth(tok);
+    }
+    return width;
   }
 
   /** Renders `lines` (array of strings, one per in-game line) onto a
@@ -136,7 +158,10 @@ class GlyphRenderer {
     const lineHeight = this.glyphH * scale;
     const gapHeight = 6 * scale;
     const widths = lines.map((l) => this.lineWidth(l)[0]);
-    const maxWidth = Math.max(this.maxLineWidth, ...widths, 1);
+    // +1: room for the reflow marker's own 1px column, drawn flush at
+    // maxLineWidth -- without this it's clipped off the canvas whenever no
+    // line actually overflows past maxLineWidth (the common case).
+    const maxWidth = Math.max(this.maxLineWidth + 1, ...widths, 1);
     const pageBreaks = Math.max(0, Math.ceil(lines.length / GlyphRenderer.LINES_PER_PAGE) - 1);
     const canvas = document.createElement("canvas");
     canvas.width = maxWidth * scale;
@@ -146,17 +171,44 @@ class GlyphRenderer {
     // scaling would sample across glyph boundaries in the sprite sheet,
     // producing exactly the grey bleeding/blur between characters seen
     // without this.
+    const spaceWidth = this.widths[this.codeOf[" "]] || 0;
     let y = 0;
     lines.forEach((line, i) => {
       this._drawLine(ctx, line, 0, y, scale);
-      y += lineHeight;
       const isPageEnd = (i + 1) % GlyphRenderer.LINES_PER_PAGE === 0;
+      // Reflow marker: a real, same-page next line whose first word would
+      // still fit here (plus the space that joining them needs) if you
+      // pulled it up -- a manual reflow aid, not an error/overflow signal.
+      // Drawn at the row's own render-area edge (maxLineWidth), not this
+      // line's own text-end -- a fixed reference column across every row,
+      // not tied to how short this particular line happens to be. Never
+      // overlaps this line's own text: the fit check already guarantees
+      // widths[i] <= maxLineWidth whenever the marker is drawn at all.
+      const nextLine = i < lines.length - 1 && !isPageEnd ? lines[i + 1] : null;
+      if (nextLine !== null && nextLine.trim() !== "") {
+        const nextWordWidth = this.firstWordWidth(nextLine);
+        if (widths[i] + spaceWidth + nextWordWidth <= this.maxLineWidth) {
+          this._drawReflowMarker(ctx, this.maxLineWidth, y, lineHeight, scale);
+        }
+      }
+      y += lineHeight;
       if (isPageEnd && i !== lines.length - 1) {
         this._drawPageBreak(ctx, canvas.width, y, gapHeight, scale);
         y += gapHeight;
       }
     });
     return canvas;
+  }
+
+  /** A 1-in-game-pixel-wide yellow bar at column `x` (unscaled game
+   * pixels, expected to be maxLineWidth -- the row's own render-area
+   * edge, the same for every row regardless of that row's own text
+   * length). */
+  _drawReflowMarker(ctx, x, y, lineHeight, scale) {
+    ctx.save();
+    ctx.fillStyle = "#f4d03f";
+    ctx.fillRect(x * scale, y, scale, lineHeight);
+    ctx.restore();
   }
 
   _drawPageBreak(ctx, width, y, gapHeight, scale) {
@@ -433,7 +485,13 @@ class MessageRow {
     const panel = document.createElement("div");
     panel.className = "panel proposed";
     panel.innerHTML = `
-      <div class="label">Proposed<span class="tag">editable</span></div>
+      <div class="label">Proposed<span class="tag">editable</span>
+        <span class="proposed-actions">
+          <span class="matches-snes-badge hidden">matches SNES</span>
+          <button type="button" class="restore-snes-btn"
+                  title="Replace this Proposed text with the exact SNES original">Restore SNES</button>
+        </span>
+      </div>
       <canvas></canvas>
       <textarea spellcheck="false"></textarea>
       <div class="error-banner hidden"></div>
@@ -459,13 +517,27 @@ class MessageRow {
   _wireEditing() {
     const textarea = this.el.querySelector(".proposed textarea");
     let debounce = null;
-    textarea.addEventListener("input", () => {
-      this.proposedText = textarea.value;
-      this._renderProposed();
+    const persistSoon = () => {
       clearTimeout(debounce);
       debounce = setTimeout(() => {
         this.onDirty(this.data.key, { proposed: this._savedProposedValue(), completed: this.completed });
       }, 400);
+    };
+    textarea.addEventListener("input", () => {
+      this.proposedText = textarea.value;
+      this._renderProposed();
+      persistSoon();
+    });
+
+    const restoreBtn = this.el.querySelector(".restore-snes-btn");
+    restoreBtn.addEventListener("click", () => {
+      this.proposedText = this.data.snes_lines.join("\n");
+      textarea.value = this.proposedText;
+      this._renderProposed();
+      // a discrete action, not a keystroke -- persist right away rather
+      // than waiting out the typing debounce.
+      clearTimeout(debounce);
+      this.onDirty(this.data.key, { proposed: this._savedProposedValue(), completed: this.completed });
     });
   }
 
@@ -510,6 +582,11 @@ class MessageRow {
     const proposedJoined = lines.join(" ");
     this.el.querySelector(".panel.proposed .diff-preview").innerHTML =
       DiffHighlighter.diff(snesJoined, proposedJoined, this.data.snes_lines, lines).right;
+
+    // Exact match, including line breaks -- not just the same wording
+    // reflowed differently -- since that's what "identical to SNES" means.
+    const matchesSnes = this.proposedText === this.data.snes_lines.join("\n");
+    this.el.querySelector(".matches-snes-badge").classList.toggle("hidden", !matchesSnes);
 
     const hasError = this._renderBadges(lines);
     this._applyErrorState(hasError);

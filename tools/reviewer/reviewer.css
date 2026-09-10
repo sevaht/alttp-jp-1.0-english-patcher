@@ -132,6 +132,36 @@ header input#filter {
   color: #bbb;
 }
 
+.proposed-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.matches-snes-badge {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: #1f3a1f;
+  color: #9dffa0;
+}
+
+.restore-snes-btn {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background: #2a2a2e;
+  color: #ccc;
+  cursor: pointer;
+}
+
+.restore-snes-btn:hover {
+  background: #3a3a3e;
+  color: #fff;
+}
+
 .panels {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
